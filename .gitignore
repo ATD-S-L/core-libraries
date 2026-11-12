@@ -1,0 +1,61 @@
+# Build directories
+build/
+cmake-build-*/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-workspace
+*.sublime-project
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Test and coverage
+coverage/
+*.gcda
+*.gcno
+.coverage
+htmlcov/
+
+# Python and dependencies
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Documentation
+docs/_build/
+site/
+
+# Dependencies
+vcpkg_installed/
+node_modules/
+conan/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
