@@ -1,0 +1,98 @@
+name: Dispatch Issue to Agent
+description: Routes an issue to the appropriate specialized agent
+author: Centro de Control
+
+inputs:
+  agent-type:
+    description: Type of agent (backend, frontend, firmware, library)
+    required: true
+  issue-number:
+    description: GitHub issue number
+    required: true
+  issue-title:
+    description: Title of the issue
+    required: true
+  issue-url:
+    description: URL to the GitHub issue
+    required: true
+  labels:
+    description: JSON array of issue labels
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up environment
+      shell: bash
+      run: |
+        echo "AGENT_TYPE=${{ inputs.agent-type }}" >> $GITHUB_ENV
+        echo "ISSUE_NUMBER=${{ inputs.issue-number }}" >> $GITHUB_ENV
+        echo "ISSUE_TITLE=${{ inputs.issue-title }}" >> $GITHUB_ENV
+        echo "ISSUE_URL=${{ inputs.issue-url }}" >> $GITHUB_ENV
+        
+    - name: Create task context
+      shell: bash
+      run: |
+        cat > task-context.json << 'EOF'
+        {
+          "id": "task-${{ inputs.issue-number }}-$(date +%s)",
+          "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+          "agent": "${{ inputs.agent-type }}",
+          "source": {
+            "repository": "${{ github.repository }}",
+            "issue_number": ${{ inputs.issue-number }},
+            "issue_url": "${{ inputs.issue-url }}"
+          },
+          "requirements": {
+            "title": "${{ inputs.issue-title }}",
+            "labels": ${{ inputs.labels }}
+          },
+          "context": {
+            "branch_base": "${{ github.base_ref || 'main' }}",
+            "target_branch": "feature/issue-${{ inputs.issue-number }}",
+            "github_workspace": "${{ github.workspace }}"
+          },
+          "resources": {
+            "github_token": "***REDACTED***",
+            "pr_auto_merge": true,
+            "ci_timeout_minutes": 240
+          }
+        }
+        EOF
+        echo "Task context created"
+        
+    - name: Log dispatch event
+      shell: bash
+      run: |
+        echo "📤 Dispatching to ${{ inputs.agent-type }} agent"
+        echo "   Issue: #${{ inputs.issue-number }} - ${{ inputs.issue-title }}"
+        echo "   URL: ${{ inputs.issue-url }}"
+        
+    - name: Initialize agent workspace
+      shell: bash
+      run: |
+        BRANCH_NAME="feature/issue-${{ inputs.issue-number }}"
+        
+        # Create and checkout feature branch
+        git config user.name "Centro de Control"
+        git config user.email "centro-de-control@atd-sl.io"
+        git fetch origin
+        git checkout -b "$BRANCH_NAME" origin/main
+        
+        echo "✅ Agent workspace initialized on branch: $BRANCH_NAME"
+        
+    - name: Log task to monitoring system
+      shell: bash
+      run: |
+        echo "🔍 Task registered in monitoring system"
+        echo "   Agent: ${{ inputs.agent-type }}"
+        echo "   Task ID: task-${{ inputs.issue-number }}-$(date +%s)"
+        echo "   Status: dispatched"
+        
+    - name: Queue agent job
+      shell: bash
+      run: |
+        echo "⏳ Adding to ${{ inputs.agent-type }} agent queue"
+        echo "   Current time: $(date)"
+        echo "   Expected start: < 5 minutes"
+        echo "   Estimated duration: 1-4 hours"

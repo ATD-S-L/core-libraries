@@ -1,0 +1,261 @@
+# Agent Configuration
+# Configuration file for the specialized agent team orchestration
+
+agents:
+  backend:
+    name: "Backend Agent"
+    description: "Handles APIs, database, business logic"
+    repositories:
+      - "ATD-S-L/apps-backend"
+    technologies:
+      - "Node.js"
+      - "Express"
+      - "PostgreSQL"
+      - "Python"
+    max_concurrent_tasks: 2
+    timeout_minutes: 240  # 4 hours
+    retry_attempts: 3
+    retry_backoff_seconds: 300
+    features:
+      - auto_testing
+      - auto_linting
+      - auto_security_scan
+      - auto_merge
+      - auto_release
+    labels:
+      - backend
+      - api
+      - database
+      - business-logic
+
+  frontend:
+    name: "Frontend Agent"
+    description: "Handles UI, components, state management"
+    repositories:
+      - "ATD-S-L/apps-frontend"
+    technologies:
+      - "React"
+      - "TypeScript"
+      - "Tailwind CSS"
+      - "Next.js"
+    max_concurrent_tasks: 2
+    timeout_minutes: 240
+    retry_attempts: 3
+    retry_backoff_seconds: 300
+    features:
+      - auto_testing
+      - auto_linting
+      - auto_security_scan
+      - auto_merge
+      - lighthouse_audit
+      - accessibility_check
+    labels:
+      - frontend
+      - ui
+      - component
+      - ux
+
+  firmware:
+    name: "Firmware Agent"
+    description: "Handles ESP32 drivers, HAL, bootloader"
+    repositories:
+      - "ATD-S-L/firmware-esp32"
+    technologies:
+      - "C"
+      - "Rust"
+      - "ESP-IDF"
+      - "FreeRTOS"
+    max_concurrent_tasks: 1
+    timeout_minutes: 360  # 6 hours
+    retry_attempts: 2
+    retry_backoff_seconds: 600
+    features:
+      - auto_testing
+      - static_analysis
+      - binary_generation
+      - auto_merge
+    labels:
+      - firmware
+      - driver
+      - hal
+      - bootloader
+
+  library:
+    name: "Library Agent"
+    description: "Handles shared utilities, multi-language"
+    repositories:
+      - "ATD-S-L/core-libraries"
+    technologies:
+      - "JavaScript"
+      - "Python"
+      - "Go"
+      - "Rust"
+    max_concurrent_tasks: 1
+    timeout_minutes: 300
+    retry_attempts: 3
+    retry_backoff_seconds: 300
+    features:
+      - auto_testing
+      - auto_linting
+      - auto_security_scan
+      - auto_merge
+      - auto_publish
+      - semantic_versioning
+    labels:
+      - library
+      - utility
+      - shared
+      - multi-language
+
+# CI/CD Configuration
+ci_cd:
+  mandatory_checks:
+    - unit_tests:
+        timeout_minutes: 15
+        min_coverage_percent: 80
+        fail_on_regression: true
+        
+    - integration_tests:
+        timeout_minutes: 20
+        fail_on_any_failure: true
+        
+    - linting:
+        tools:
+          - eslint
+          - prettier
+          - black
+          - clippy
+        fail_on_violations: true
+        
+    - security_scan:
+        tools:
+          - npm-audit
+          - bandit
+          - clippy-lint
+          - snyk
+        min_severity_level: "high"
+        
+    - type_checking:
+        tools:
+          - typescript
+          - mypy
+          - clippy
+        fail_on_error: true
+        
+    - performance_benchmark:
+        baseline_branch: "main"
+        allowed_regression_percent: -5
+        
+    - accessibility_audit:
+        applies_to:
+          - frontend
+        standard: "WCAG 2.1 Level AA"
+
+# Auto-merge Policy
+auto_merge:
+  enabled: true
+  strategy: "squash"
+  delete_head_branch: true
+  commit_message_template: "Merge pull request from {{agent_name}}: {{issue_title}}"
+  require_all_checks_pass: true
+  require_status_checks:
+    - "unit-tests"
+    - "integration-tests"
+    - "linting"
+    - "security-scan"
+    - "type-checking"
+
+# Release Configuration
+release:
+  strategy: "semantic_versioning"
+  changelog_generation: true
+  changelog_format: "markdown"
+  package_managers:
+    library:
+      - npm
+      - pypi
+      - crates.io
+  github_releases:
+    enabled: true
+    include_artifacts: true
+    include_changelog: true
+
+# Escalation Configuration
+escalation:
+  timeout:
+    threshold_minutes: 240  # 4 hours
+    action: "notify_on_call"
+    priority: "high"
+    
+  ci_failure:
+    max_retries: 3
+    action: "code_owner_review"
+    priority: "medium"
+    
+  conflicts:
+    threshold: 1
+    action: "manual_merge_resolution"
+    priority: "high"
+    
+  missing_info:
+    threshold: 1
+    action: "request_clarification"
+    priority: "medium"
+
+# Notifications
+notifications:
+  slack:
+    enabled: false  # Set to true with webhook URL
+    channels:
+      - "#agent-updates"
+      - "#deployments"
+    events:
+      - task_started
+      - task_completed
+      - task_failed
+      - pr_created
+      - pr_merged
+      - release_published
+      
+  email:
+    enabled: false  # Set to true with SMTP config
+    recipients:
+      - "team@atd-sl.io"
+    digest_frequency: "daily"
+    
+  github:
+    enabled: true
+    issue_comments: true
+    pr_reviews: true
+    releases: true
+
+# Monitoring & Metrics
+monitoring:
+  enabled: true
+  metrics:
+    - completion_rate
+    - average_duration
+    - success_rate
+    - test_coverage
+    - ci_reliability
+    - pr_merge_time
+  retention_days: 90
+  dashboard:
+    enabled: true
+    url: "https://centro-de-control.atd-sl.io/dashboard"
+
+# Security
+security:
+  token_rotation_days: 90
+  require_signed_commits: false
+  branch_protection:
+    enabled: true
+    require_pr_review: false  # Agents auto-approve
+    dismiss_stale_pr_approvals: false
+    require_status_checks: true
+  audit_logging: true
+  allowed_repositories:
+    - "ATD-S-L/apps-backend"
+    - "ATD-S-L/apps-frontend"
+    - "ATD-S-L/firmware-esp32"
+    - "ATD-S-L/core-libraries"

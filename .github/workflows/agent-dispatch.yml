@@ -1,0 +1,159 @@
+name: Route Issue to Specialized Agent
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  triage-and-dispatch:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Extract issue metadata
+        id: extract
+        run: |
+          LABELS='${{ toJSON(github.event.issue.labels.*.name) }}'
+          TITLE='${{ github.event.issue.title }}'
+          BODY='${{ github.event.issue.body }}'
+          ISSUE_NUMBER='${{ github.event.issue.number }}'
+          ISSUE_URL='${{ github.event.issue.html_url }}'
+          CREATOR='${{ github.event.issue.user.login }}'
+          
+          echo "labels=$LABELS" >> $GITHUB_OUTPUT
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "body=$BODY" >> $GITHUB_OUTPUT
+          echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+          echo "creator=$CREATOR" >> $GITHUB_OUTPUT
+          
+      - name: Validate issue quality
+        id: validate
+        run: |
+          TITLE='${{ steps.extract.outputs.title }}'
+          BODY='${{ steps.extract.outputs.body }}'
+          
+          TITLE_LEN=${#TITLE}
+          BODY_LEN=${#BODY}
+          
+          if [ "$TITLE_LEN" -lt 10 ]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=Title too short (minimum 10 characters)" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          if [ "$BODY_LEN" -lt 50 ]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=Description too short (minimum 50 characters)" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "valid=true" >> $GITHUB_OUTPUT
+          
+      - name: Post validation error
+        if: failure() && steps.validate.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ Issue quality check failed:\n\n${{ steps.validate.outputs.error }}\n\nPlease update your issue and resubmit.'
+            });
+            
+      - name: Check for required agent label
+        id: check_label
+        run: |
+          LABELS='${{ steps.extract.outputs.labels }}'
+          
+          if echo "$LABELS" | grep -q '"backend"'; then
+            echo "agent=backend" >> $GITHUB_OUTPUT
+            echo "agent_name=Backend Agent" >> $GITHUB_OUTPUT
+          elif echo "$LABELS" | grep -q '"frontend"'; then
+            echo "agent=frontend" >> $GITHUB_OUTPUT
+            echo "agent_name=Frontend Agent" >> $GITHUB_OUTPUT
+          elif echo "$LABELS" | grep -q '"firmware"'; then
+            echo "agent=firmware" >> $GITHUB_OUTPUT
+            echo "agent_name=Firmware Agent" >> $GITHUB_OUTPUT
+          elif echo "$LABELS" | grep -q '"library"'; then
+            echo "agent=library" >> $GITHUB_OUTPUT
+            echo "agent_name=Library Agent" >> $GITHUB_OUTPUT
+          else
+            echo "agent=none" >> $GITHUB_OUTPUT
+            echo "agent_name=None" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Post label requirement message
+        if: steps.check_label.outputs.agent == 'none'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Agent Routing Required**\n\nPlease add one of these labels to route to the appropriate agent:\n\n- **backend**: APIs, database, business logic\n- **frontend**: UI, components, state management\n- **firmware**: Drivers, HAL, bootloader\n- **library**: Shared utilities, multi-language\n\nOnce labeled, the agent will begin work immediately.'
+            });
+            
+      - name: Dispatch to Backend Agent
+        if: steps.check_label.outputs.agent == 'backend'
+        uses: ./.github/actions/dispatch-to-agent
+        with:
+          agent-type: backend
+          issue-number: ${{ steps.extract.outputs.issue_number }}
+          issue-title: ${{ steps.extract.outputs.title }}
+          issue-url: ${{ steps.extract.outputs.issue_url }}
+          labels: ${{ steps.extract.outputs.labels }}
+          
+      - name: Dispatch to Frontend Agent
+        if: steps.check_label.outputs.agent == 'frontend'
+        uses: ./.github/actions/dispatch-to-agent
+        with:
+          agent-type: frontend
+          issue-number: ${{ steps.extract.outputs.issue_number }}
+          issue-title: ${{ steps.extract.outputs.title }}
+          issue-url: ${{ steps.extract.outputs.issue_url }}
+          labels: ${{ steps.extract.outputs.labels }}
+          
+      - name: Dispatch to Firmware Agent
+        if: steps.check_label.outputs.agent == 'firmware'
+        uses: ./.github/actions/dispatch-to-agent
+        with:
+          agent-type: firmware
+          issue-number: ${{ steps.extract.outputs.issue_number }}
+          issue-title: ${{ steps.extract.outputs.title }}
+          issue-url: ${{ steps.extract.outputs.issue_url }}
+          labels: ${{ steps.extract.outputs.labels }}
+          
+      - name: Dispatch to Library Agent
+        if: steps.check_label.outputs.agent == 'library'
+        uses: ./.github/actions/dispatch-to-agent
+        with:
+          agent-type: library
+          issue-number: ${{ steps.extract.outputs.issue_number }}
+          issue-title: ${{ steps.extract.outputs.title }}
+          issue-url: ${{ steps.extract.outputs.issue_url }}
+          labels: ${{ steps.extract.outputs.labels }}
+          
+      - name: Post assignment confirmation
+        if: steps.check_label.outputs.agent != 'none'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Assigned to ${{ steps.check_label.outputs.agent_name }}**\n\nThe agent is now working on this task. You can monitor progress in the PR that will be created.\n\nExpected completion: 1-4 hours depending on complexity.'
+            });

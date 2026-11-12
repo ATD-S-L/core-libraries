@@ -1,0 +1,182 @@
+name: Post-Merge Agent Completion Handler
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: read
+
+jobs:
+  handle-agent-completion:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.head.ref, 'feature/issue-')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Extract issue number from branch
+        id: extract
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          ISSUE_NUMBER=$(echo "$BRANCH" | grep -oP 'feature/issue-\K\d+' | head -1)
+          echo "issue_number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
+          echo "✓ Issue Number: $ISSUE_NUMBER"
+          
+      - name: Get agent type from labels
+        id: agent
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+            
+            let agentType = 'unknown';
+            if (pr.body.includes('[backend]')) agentType = 'backend';
+            else if (pr.body.includes('[frontend]')) agentType = 'frontend';
+            else if (pr.body.includes('[firmware]')) agentType = 'firmware';
+            else if (pr.body.includes('[library]')) agentType = 'library';
+            
+            core.setOutput('agent_type', agentType);
+            console.log(`Agent Type: ${agentType}`);
+            
+      - name: Get merge commit information
+        id: commit
+        run: |
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          MERGE_AUTHOR=$(git show -s --format='%an' "$MERGE_SHA")
+          MERGE_MESSAGE=$(git log -1 --pretty=%B "$MERGE_SHA")
+          
+          echo "merge_sha=$MERGE_SHA" >> $GITHUB_OUTPUT
+          echo "merge_author=$MERGE_AUTHOR" >> $GITHUB_OUTPUT
+          echo "✓ Merge Commit: ${MERGE_SHA:0:7}"
+          
+      - name: Calculate semantic version bump
+        id: version
+        run: |
+          # For demonstration, use patch version bump
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          
+          # Extract version components
+          VERSION="${LATEST_TAG#v}"
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          
+          # Increment patch version
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+          NEW_TAG="v$NEW_VERSION"
+          
+          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "✓ Version Bump: $VERSION → $NEW_VERSION"
+          
+      - name: Create release tag
+        run: |
+          git config user.name "Centro de Control"
+          git config user.email "centro-de-control@atd-sl.io"
+          
+          git tag -a "${{ steps.version.outputs.new_tag }}" \
+            -m "Release ${{ steps.version.outputs.new_version }} - Merged: ${{ github.event.pull_request.title }}" \
+            "${{ steps.commit.outputs.merge_sha }}"
+            
+          git push origin "${{ steps.version.outputs.new_tag }}"
+          echo "✓ Release tag created: ${{ steps.version.outputs.new_tag }}"
+          
+      - name: Generate changelog entry
+        id: changelog
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          AGENT_TYPE="${{ steps.agent.outputs.agent_type }}"
+          
+          ENTRY="- **$TITLE** (#$PR_NUMBER) - $AGENT_TYPE agent"
+          echo "entry<<EOF" >> $GITHUB_OUTPUT
+          echo "$ENTRY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: Close related issue
+        if: steps.extract.outputs.issue_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = parseInt('${{ steps.extract.outputs.issue_number }}');
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `✅ **Task Completed!**
+
+**PR**: #${{ github.event.pull_request.number }}
+**Release**: ${{ steps.version.outputs.new_tag }}
+**Version**: ${{ steps.version.outputs.new_version }}
+
+${{ steps.changelog.outputs.entry }}
+
+The work has been merged to main and is ready for release.`
+            });
+            
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+            
+            console.log(`✓ Issue #${issueNumber} closed`);
+            
+      - name: Create GitHub Release
+        if: steps.version.outputs.new_version != steps.version.outputs.current_version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: '${{ steps.version.outputs.new_tag }}',
+              name: 'Release ${{ steps.version.outputs.new_version }}',
+              body: `## Changes
+              
+${{ steps.changelog.outputs.entry }}
+
+**Merged By**: Centro de Control
+**Merge Commit**: ${{ steps.commit.outputs.merge_sha }}
+**Agent Type**: ${{ steps.agent.outputs.agent_type }}`,
+              draft: false,
+              prerelease: false
+            });
+            
+            console.log('✓ GitHub Release created');
+            
+      - name: Publish to package managers (if library)
+        if: steps.agent.outputs.agent_type == 'library'
+        run: |
+          echo "📦 Publishing library to package managers..."
+          echo "   Version: ${{ steps.version.outputs.new_version }}"
+          echo "   Note: Actual publishing requires credentials in secrets"
+          echo "   Supported: npm, PyPI, crates.io"
+          
+      - name: Trigger post-deployment tasks
+        run: |
+          echo "🚀 Post-Merge Completion Summary"
+          echo "=========================================="
+          echo "Issue: #${{ steps.extract.outputs.issue_number }}"
+          echo "PR: #${{ github.event.pull_request.number }}"
+          echo "Release: ${{ steps.version.outputs.new_tag }}"
+          echo "Agent: ${{ steps.agent.outputs.agent_type }}"
+          echo "Status: ✅ Completed and Released"
+          echo "=========================================="

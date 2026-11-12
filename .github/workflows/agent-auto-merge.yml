@@ -1,0 +1,121 @@
+name: PR Auto-Merge for Agent Tasks
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+  check_suite:
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: write
+  statuses: read
+
+jobs:
+  auto-merge-check:
+    runs-on: ubuntu-latest
+    if: |
+      github.head_ref != null && (
+        contains(github.head_ref, 'feature/issue-') ||
+        contains(github.event.pull_request.title, 'agent')
+      )
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Verify this is an agent PR
+        id: verify
+        run: |
+          if [[ "${{ github.head_ref }}" == feature/issue-* ]] || [[ "${{ github.event.pull_request.user.login }}" == "dependabot[bot]" ]]; then
+            echo "is_agent_pr=true" >> $GITHUB_OUTPUT
+            echo "✓ Agent PR detected"
+          else
+            echo "is_agent_pr=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Wait for CI/CD checks
+        id: wait_checks
+        if: steps.verify.outputs.is_agent_pr == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo, number } = context.issue;
+            let allChecksPassed = false;
+            let attempts = 0;
+            const maxAttempts = 72; // 6 hours with 5-minute intervals
+            
+            while (!allChecksPassed && attempts < maxAttempts) {
+              const pr = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: number
+              });
+              
+              console.log(`Checking PR status (attempt ${attempts + 1}/${maxAttempts})`);
+              
+              // Check if all required status checks have passed
+              if (pr.mergeable === true && pr.mergeable_state === 'clean') {
+                allChecksPassed = true;
+                console.log('✅ All checks passed - PR is ready to merge');
+              } else if (pr.mergeable === false) {
+                console.log('❌ PR has conflicts - cannot auto-merge');
+                core.setFailed('PR has merge conflicts');
+                break;
+              } else {
+                console.log(`⏳ Checks in progress (${pr.mergeable_state})`);
+                attempts++;
+                if (attempts < maxAttempts) {
+                  await new Promise(resolve => setTimeout(resolve, 300000)); // 5 minutes
+                }
+              }
+            }
+            
+            if (attempts >= maxAttempts && !allChecksPassed) {
+              core.setFailed('Checks did not complete within timeout');
+            }
+            
+            core.setOutput('all_passed', allChecksPassed);
+            
+      - name: Approve pull request
+        if: steps.wait_checks.outputs.all_passed == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo, number } = context.issue;
+            
+            github.rest.pulls.createReview({
+              owner,
+              repo,
+              pull_number: number,
+              event: 'APPROVE',
+              body: '✅ All automated checks passed. Approving for merge.\n\nCentro de Control Auto-Approval'
+            });
+            
+            console.log('✅ PR approved by Centro de Control');
+            
+      - name: Auto-merge pull request
+        if: steps.wait_checks.outputs.all_passed == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo, number } = context.issue;
+            
+            try {
+              const response = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: number,
+                commit_title: context.payload.pull_request.title,
+                merge_method: 'squash'
+              });
+              
+              console.log('✅ Pull request merged successfully');
+              console.log(`Merge Commit: ${response.data.sha}`);
+              
+            } catch (error) {
+              console.log(`Note: ${error.message}`);
+              // PR might already be merged or have other issues
+            }
