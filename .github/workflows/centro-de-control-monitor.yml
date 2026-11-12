@@ -1,8 +1,10 @@
-name: Centro de Control - Monitor Agent Progress
+name: Centro de Control - Monitor Agent Progress (DISABLED)
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'  # Every 5 minutes
+  # DISABLED: This workflow was causing excessive email notifications
+  # Re-enable if needed by removing the leading '#' from the schedule below
+  # schedule:
+  #   - cron: '*/5 * * * *'  # Every 5 minutes
   workflow_dispatch:
 
 permissions:
