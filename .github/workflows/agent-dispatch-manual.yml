@@ -1,0 +1,88 @@
+name: Manual Agent Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "GitHub issue number to dispatch"
+        required: true
+        type: string
+      agent_type:
+        description: "Agent type to dispatch"
+        required: true
+        type: choice
+        options:
+          - backend
+          - frontend
+          - firmware
+          - library
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  manual-dispatch:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Fetch issue details
+        id: fetch_issue
+        run: |
+          ISSUE_DATA=$(gh issue view ${{ inputs.issue_number }} --json title,body,labels)
+          TITLE=$(echo "$ISSUE_DATA" | jq -r '.title')
+          BODY=$(echo "$ISSUE_DATA" | jq -r '.body')
+          LABELS=$(echo "$ISSUE_DATA" | jq '.labels')
+          ISSUE_URL="https://github.com/${{ github.repository }}/issues/${{ inputs.issue_number }}"
+          
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "body=$BODY" >> $GITHUB_OUTPUT
+          echo "labels=$LABELS" >> $GITHUB_OUTPUT
+          echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Validate issue exists
+        run: |
+          if [ -z "${{ steps.fetch_issue.outputs.title }}" ]; then
+            echo "❌ Issue #${{ inputs.issue_number }} not found"
+            exit 1
+          fi
+          echo "✅ Found issue: ${{ steps.fetch_issue.outputs.title }}"
+          
+      - name: Post dispatch notification
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: ${{ inputs.issue_number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🔄 **Manual Agent Dispatch Triggered**\n\n**Agent Type:** `${{ inputs.agent_type }}`\n**Dispatch Time:** `' + new Date().toISOString() + '`\n\nAgent will process this issue immediately.'
+            });
+            
+      - name: Dispatch to Agent
+        uses: ./.github/actions/dispatch-to-agent
+        with:
+          agent-type: ${{ inputs.agent_type }}
+          issue-number: ${{ inputs.issue_number }}
+          issue-title: ${{ steps.fetch_issue.outputs.title }}
+          issue-url: ${{ steps.fetch_issue.outputs.issue_url }}
+          labels: ${{ steps.fetch_issue.outputs.labels }}
+          
+      - name: Post completion notification
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: ${{ inputs.issue_number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Agent Dispatch Complete**\n\nThe `${{ inputs.agent_type }}` agent has been dispatched and is working on this task.'
+            });
